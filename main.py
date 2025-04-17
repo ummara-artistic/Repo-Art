@@ -34,6 +34,7 @@ st.sidebar.title("Navigation")
 
 
 # === Load JSON Data ===
+# Load Data from JSON
 file_path = os.path.join(os.getcwd(), "data", "cust_stock.json")
 if not os.path.exists(file_path):
     st.error("File not found: cust_stock.json")
