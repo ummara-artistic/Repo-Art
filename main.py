@@ -160,38 +160,28 @@ data_2024["predicted_qty_2025"] = predictions_2025
 # === Display KPIs and Predictions ===
 import streamlit as st
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns([1, 1, 1])
 
-# Total Stock Quantity (2024)
-col1.markdown(f"""
-<div style="background-color:#f4f4f4; padding:20px; border-radius:10px; box-shadow:0 4px 8px rgba(0, 0, 0, 0.1); text-align:center;">
-<h3>📦 Total Stock Quantity (2024)</h3>
-<p style="font-size: 24px; font-weight: bold;">{total_stock:,}</p>
-</div>""", unsafe_allow_html=True)
+card_style = """
+<div style="background-color:#f4f4f4; width: 100%; padding:10px; 
+            border-radius:12px; box-shadow:0 4px 8px rgba(0, 0, 0, 0.1); 
+            text-align:center;">
+    <h3 style="margin-bottom: 5px;">{icon} {title}</h3>
+    <p style="font-size: 26px; font-weight: bold; margin: 0;">{value}</p>
+</div>
+"""
 
-# Total Inventory Value (2024)
-col2.markdown(f"""
-<div style="background-color:#f4f4f4; padding:20px; border-radius:10px; box-shadow:0 4px 8px rgba(0, 0, 0, 0.1); text-align:center;">
-<h3>💰 Total Inventory Value (2024)</h3>
-<p style="font-size: 24px; font-weight: bold;">{total_value:,.2f}</p>
-</div>""", unsafe_allow_html=True)
+col1.markdown(card_style.format(
+    icon="📦", title="Total Stock Quantity (2024)", value=f"{total_stock:,.2f}"
+), unsafe_allow_html=True)
 
-# Average Stock Age (2024)
-col3.markdown(f"""
-<div style="background-color:#f4f4f4; padding:20px; border-radius:10px; box-shadow:0 4px 8px rgba(0, 0, 0, 0.1); text-align:center;">
-<h3>⏳ Avg Stock Age (2024)</h3>
-<p style="font-size: 24px; font-weight: bold;">{avg_stock_age:.2f} days</p>
-</div>""", unsafe_allow_html=True)
+col2.markdown(card_style.format(
+    icon="💰", title="Total Inventory Value (2024)", value=f"{total_value:,.2f}"
+), unsafe_allow_html=True)
 
-# Predicted Stock Quantity for 2025
-predicted_total_2025 = data_2024["predicted_qty_2025"].sum()  # Sum of the predicted quantities for 2025
-col4.markdown(f"""
-<div style="background-color:#f4f4f4; padding:20px; border-radius:10px; box-shadow:0 4px 8px rgba(0, 0, 0, 0.1); text-align:center;">
-<h3>🔮 Predicted Stock Quantity (2025)</h3>
-<p style="font-size: 24px; font-weight: bold;">{predicted_total_2025:,}</p>
-</div>""", unsafe_allow_html=True)
-
-
+col3.markdown(card_style.format(
+    icon="⏳", title="Avg Stock Age (2024)", value=f"{avg_stock_age:.2f} days"
+), unsafe_allow_html=True)
 
 
 
@@ -215,6 +205,25 @@ def make_donut_chart(names, values, colors):
     )
     return fig
 
+import streamlit as st
+import plotly.graph_objects as go
+import plotly.express as px
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.arima.model import ARIMA
+
+# Define the donut chart creation function (assuming this is already defined)
+def make_donut_chart(names, values, colors):
+    fig = go.Figure(data=[go.Pie(
+        labels=names, 
+        values=values, 
+        hole=0.4, 
+        marker=dict(colors=colors)
+    )])
+    return fig
+
+# Assuming df is your DataFrame
+# Create three columns
 col1, col2, col3 = st.columns(3)
 
 # === 1. Inventory Position Donut Chart ===
@@ -231,9 +240,9 @@ with col1:
     df_2024 = df[df["year"] == 2024]
 
     position_counts = {
-        "Excess": (df_2024["qty"] > 100).sum(),
-        "Out of Stock": (df_2024["qty"] == 0).sum(),
-        "Below Panic Point": ((df_2024["qty"] < 10) & (df_2024["qty"] > 0)).sum(),
+        "Excess - (More than 100) ": (df_2024["qty"] > 100).sum(),
+        "Out of Stock - (Qty = 0)": (df_2024["qty"] == 0).sum(),
+        "Below Panic Point - (Qty < 10 and > 0)": ((df_2024["qty"] < 10) & (df_2024["qty"] > 0)).sum(),
     }
 
     fig1 = make_donut_chart(
@@ -241,7 +250,7 @@ with col1:
         values=list(position_counts.values()),
         colors=["pink", "green", "purple"]
     )
-    st.plotly_chart(fig1, use_container_width=False)
+    st.plotly_chart(fig1, use_container_width=True)
 
 # === 2. Usage Pattern Types Donut Chart ===
 with col2:
@@ -261,7 +270,7 @@ with col2:
             (df_2024["qty"] >= 10) & (df_2024["qty"] < 50),
             df_2024["qty"] >= 50,
         ],
-        ["Dead", "Slow", "Sporadic", "Recurring"],
+        ["Dead - (Qty = 0)", "Slow - (Qty < 10)", "Sporadic - (Qty >=10 )", "Recurring - (Qty >= 50)"],
         default="New",
     )
     usage_counts_2024 = df_2024["usage_type"].value_counts()
@@ -271,71 +280,87 @@ with col2:
         values=usage_counts_2024.values,
         colors=["sea green", "orange", "purple", "blue"]
     )
-    st.plotly_chart(fig2, use_container_width=False)
+    st.plotly_chart(fig2, use_container_width=True)
 
+# === 3. Top 5 Consumption Patterns Prediction (2025) ===
 with col3:
     st.markdown(
         """
-        <div style="margin-top:20px; padding:8px; background-color:#f4f4f4; border-radius:6px; font-weight:bold; text-align:center;">
-           <h3 style="color: black;">📦 Top 10 Consumption Patterns (2025 Prediction)</h3> 
+        <div style="margin-top:20px; padding:10px; background-color:#f4f4f4; border-radius:8px; font-weight:bold; text-align:center;">
+           <h3 style="color: black;">📦 Top 5 Consumption Patterns - 2025 Prediction</h3> 
         </div>
         """,
         unsafe_allow_html=True
     )
 
-# Add prediction for 2025 using ARIMA model
-forecast_data_2025 = []
-for desc in df["description"].unique():  # Use entire dataset, not just 2024
-    item_df = df[df["description"] == desc]
-    monthly_series = item_df.resample("M", on="txndate")["qty"].sum().fillna(0)
-    if len(monthly_series) >= 6:
-        try:
-            model = ARIMA(monthly_series, order=(1, 1, 1))
-            model_fit = model.fit()
-            forecast = model_fit.forecast(steps=12)
-            total_forecast_2025 = forecast.sum()
-            forecast_data_2025.append({"description": desc, "forecast_qty_2025": total_forecast_2025})
-        except:
-            continue
+    # Forecast data for 2025 using ARIMA model
+    forecast_data_2025 = []
+    for desc in df["description"].unique():
+        item_df = df[df["description"] == desc]
+        monthly_series = item_df.resample("M", on="txndate")["qty"].sum().fillna(0)
+        if len(monthly_series) >= 6:
+            try:
+                model = ARIMA(monthly_series, order=(1, 1, 1))
+                model_fit = model.fit()
+                forecast = model_fit.forecast(steps=12)
+                total_forecast_2025 = forecast.sum()
+                forecast_data_2025.append({
+                    "description": desc,
+                    "forecast_qty_2025": total_forecast_2025
+                })
+            except:
+                continue
 
-# Forecast data for 2025 consumption patterns
-forecast_df_2025 = pd.DataFrame(forecast_data_2025).sort_values("forecast_qty_2025", ascending=False).head(10)
+    # Create DataFrame and select Top 5
+    forecast_df_2025 = pd.DataFrame(forecast_data_2025).sort_values("forecast_qty_2025", ascending=False).head(5)
 
-# Plotting the donut chart for predicted 2025 consumption patterns
-fig = px.pie(
-    names = usage_counts_2024.index[-5:]
-    values = forecast_df_2025.loc[names, 'description']
+    # Create donut chart with labels inside
+    fig3 = px.pie(
+        names=forecast_df_2025['description'],
+        values=forecast_df_2025['forecast_qty_2025'],
+        hole=0.4,
+        color_discrete_sequence=["sea green", "orange", "purple", "blue", "red"]
+    )
 
-    color_discrete_sequence=["sea green", "orange", "purple", "blue", "red", "pink"]
-)
+    # Customize label display
+    fig3.update_traces(
+        textinfo="label+percent",
+        insidetextorientation="radial"
+    )
 
-# Show the pie chart for predicted 2025 usage patterns
-col3.plotly_chart(fig, use_container_width=False)
+    # Layout tweaks
+    fig3.update_layout(
+        height=400,
+        width=400,
+        margin=dict(t=20, b=20, l=20, r=20),
+        showlegend=False  # Set True if you want legend outside
+    )
+
+    # Show chart
+    st.plotly_chart(fig3, use_container_width=True)
 
 
 
 
 
 
-# === Top Trending Items ===
-st.subheader("🔥 Top Trending Items (Bar Chart)")
+
+
+
+
+# Your existing code
+st.subheader("🔥 Top Trending Items ")
 
 count_option = st.selectbox("Select number of top items to show:", [10, 50, 100], index=0)
 
 top_items_df = df.groupby("description")["qty"].sum().reset_index().sort_values("qty", ascending=False).head(count_option)
 
-if count_option == 10:
-    fig1 = px.bar(top_items_df, x="description", y="qty", color="qty",
-                  title=f"Top {count_option} Trending Items (by Quantity)",
-                  labels={"qty": "Total Qty", "description": "Item"})
-    fig1.update_layout(xaxis={'categoryorder': 'total descending'})
-else:
-    fig1 = px.bar(top_items_df, x="qty", y="description", color="qty", orientation="h",
-                  title=f"Top {count_option} Trending Items (by Quantity)",
-                  labels={"qty": "Total Qty", "description": "Item"})
-    fig1.update_layout(yaxis={'categoryorder': 'total ascending'})
+# Create a Violin plot. Instead of `color_continuous_scale`, use `color` for a categorical variable.
+fig8 = px.violin(top_items_df, y="qty", box=True, title=f"Top {count_option} Trending Items (Violin Plot)",
+                 labels={"qty": "Total Qty", "description": "Item"}, color="description")
 
-st.plotly_chart(fig1, use_container_width=True)
+st.plotly_chart(fig8, use_container_width=True)
+
 
 
 
