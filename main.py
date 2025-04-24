@@ -65,17 +65,65 @@ df_2024 = df[(df["year"] == 2024)]
 df_2025 = df[(df["year"] == 2025)]
 
 # === Sidebar: Key Points ===
+import pandas as pd
+import streamlit as st
+from sklearn.ensemble import RandomForestRegressor
+
+
+
+# === Use Only Data from 2024 ===
+df_2024 = df[df["year"] == 2024]
+
+# === Sidebar: Key Points ===
 st.sidebar.subheader("Key Points")
 
-# Low Stock Alert
-with st.sidebar.expander("⚠️ Low Stock Alerts"):
-    low_stock_items = df[df["lead_time_stock"] < 100]
-    st.markdown(f"{len(low_stock_items)} items are low in stock.")
-    for _, item in low_stock_items.iterrows():
-        st.markdown(f"- **{item['description']}** (Qty: {item['qty']})")
+# === Helper Function: Create Lag Features ===
+def create_lag_features(df, lags=[1, 2, 3]):
+    df = df.copy()
+    for lag in lags:
+        df[f"lag_{lag}"] = df["lead_time_stock"].shift(lag)
+    return df.dropna()
 
-# Customer Demand Prediction (for 2024)
-with st.sidebar.expander("🔮 Customer Demand Prediction (2024)"):
+# === Forecasting 2025 (12 months) ===
+forecasted_items = []
+
+# Loop through each unique item in 2024 data to forecast stock levels for 2025
+for item in df_2024["description"].unique():
+    item_df = df_2024[df_2024["description"] == item].sort_values("txndate")
+    item_df = create_lag_features(item_df)
+
+    if len(item_df) < 3:
+        continue  # Skip items with insufficient data
+
+    X = item_df[[f"lag_{i}" for i in [1, 2, 3]]]
+    y = item_df["lead_time_stock"]
+
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X, y)
+
+    # Use last known lags from 2024 to forecast future stock in 2025
+    last_known_lags = list(X.iloc[-1])
+
+    # Forecast the next 12 months (simulating monthly predictions for 2025)
+    forecast_horizon = 12
+    for month in range(forecast_horizon):
+        prediction = model.predict([last_known_lags])[0]
+
+        if prediction < 100:  # If stock is forecasted to be low
+            forecasted_items.append({
+                "description": item,
+                "predicted_stock": prediction,
+                "forecast_month": 2025 + month // 12  # Forecast Year (2025)
+            })
+
+        # Update lags for the next month prediction
+        last_known_lags = [prediction] + last_known_lags[:2]  # Shift lags
+
+
+
+
+# Customer Demand Prediction (for 2025)
+with st.sidebar.expander("🔮 Customer Demand Prediction (2025)"):
     forecast_data = []
     for desc in df_2024["description"].unique():
         item_df = df_2024[df_2024["description"] == desc]
@@ -463,11 +511,17 @@ st.plotly_chart(fig, use_container_width=True)
 
 
 
-# === Preprocess Data for 2024 and 2025 ===
+import pandas as pd
+import plotly.graph_objects as go
+from statsmodels.tsa.arima.model import ARIMA
+from sklearn.model_selection import train_test_split
+import streamlit as st
+
+# === Preprocess Data for 2024 (No 2025 data) ===
 df["txndate"] = pd.to_datetime(df["txndate"])
 df["description"] = df["description"].astype(str)
 df["year"] = df["txndate"].dt.year
-df = df[df["year"].isin([2024, 2025])]  # Filter data to include only 2024 and 2025
+df = df[df["year"] == 2024]  # Filter data to only include 2024
 df = df.sort_values("txndate")
 
 # === Select Description ===
@@ -480,16 +534,49 @@ if selected_desc:
     # Group by Date for Aging Values
     aging_grouped = desc_df.groupby("txndate")[["aging_60", "aging_90", "aging_180", "aging_180plus"]].sum().reset_index()
 
-    # Plot Aging Data
-    fig = px.line(
-        aging_grouped,
-        x="txndate",
-        y=["aging_60", "aging_90", "aging_180", "aging_180plus"],
-        labels={"value": "Stock Quantity", "txndate": "Date", "variable": "Aging Bucket"},
-        title=f"📈 Aging Trend for '{selected_desc}' Over Time",
-        markers=True
+    # Forecasting using ARIMA (Example: Forecasting aging_60)
+    aging_60_df = aging_grouped[["txndate", "aging_60"]]
+    aging_60_df.set_index("txndate", inplace=True)
+
+    # Fit ARIMA model on the 2024 data
+    model = ARIMA(aging_60_df, order=(5,1,0))  # ARIMA(p,d,q)
+    model_fit = model.fit()
+
+    # Forecast for the next 12 months (for 2025)
+    forecast_steps = 12  # Forecast for 12 months
+    forecast = model_fit.forecast(steps=forecast_steps)
+
+    # Create date range for 2025 (next year)
+    forecast_dates = pd.date_range(start=aging_60_df.index[-1] + pd.Timedelta(days=1), periods=forecast_steps, freq='M')
+
+    # Create forecast DataFrame
+    forecast_df = pd.DataFrame({
+        "txndate": forecast_dates,
+        "forecast_aging_60": forecast
+    })
+
+    # Combine the historical and forecasted data
+    combined_df = pd.concat([aging_60_df, forecast_df], axis=0)
+
+    # Plot the Aging Data with Forecast for 2025
+    fig = go.Figure()
+
+    # Plot the actual data from 2024
+    fig.add_trace(go.Scatter(x=aging_60_df.index, y=aging_60_df["aging_60"], mode='lines', name="Actual Aging 60"))
+
+    # Plot the forecasted data for 2025
+    fig.add_trace(go.Scatter(x=forecast_df["txndate"], y=forecast_df["forecast_aging_60"], mode='lines', name="Forecast Aging 60", line=dict(dash='dash')))
+
+    fig.update_layout(
+        title=f"📈 Aging Trend for '{selected_desc}' (Aging 60) with Forecast for 2025",
+        xaxis_title="Date",
+        yaxis_title="Stock Quantity",
+        template="plotly_dark",
+        showlegend=True
     )
+
     st.plotly_chart(fig, use_container_width=True)
+
 
 @st.cache_data(show_spinner=False)
 def fit_arima_model(item_df_grouped):
@@ -506,6 +593,15 @@ df["month"] = df["txndate"].dt.strftime("%b")  # Month abbreviation (Jan, Feb)
 df = df[df["year"].isin([2024, 2025])]  # Filter data to include only 2024 and 2025
 df.sort_values("txndate", inplace=True)
 
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+from statsmodels.tsa.arima.model import ARIMA
+import matplotlib.pyplot as plt
+import warnings
+
+warnings.filterwarnings("ignore")
+
 # === Search by Description ===
 st.subheader("🔍 Search by Item Description")
 desc_list = sorted(df["description"].dropna().unique())
@@ -513,17 +609,37 @@ selected_desc = st.selectbox("Select Item", desc_list)
 
 if selected_desc:
     item_df = df[df["description"] == selected_desc].copy()
+    item_df["txndate"] = pd.to_datetime(item_df["txndate"])
 
-    # === Monthly Aggregation for 2024 and 2025 ===
-    item_df["month_only"] = item_df["txndate"].dt.to_period("M").dt.strftime("%b-%Y")  # Include year for proper sorting
-    monthly_df = item_df.groupby("month_only")["qty"].sum().reset_index()
-    monthly_df = monthly_df.sort_values("month_only")  # Ensure months in order
+    # === Monthly Aggregation (including past years for model training) ===
+    item_df["month"] = item_df["txndate"].dt.to_period("M").dt.to_timestamp()
+    monthly_df = item_df.groupby("month")["qty"].sum().reset_index()
+    monthly_df = monthly_df.sort_values("month")
 
-    st.subheader(f"📅 Monthly Stock Trends for: {selected_desc}")
-    fig = px.line(monthly_df, x="month_only", y="qty", markers=True,
-                  title=f"📦 Stock Quantity Trend - {selected_desc}",
-                  labels={"qty": "Quantity", "month_only": "Month-Year"})
+    # === Forecasting using ARIMA ===
+    monthly_df.set_index("month", inplace=True)
+    model = ARIMA(monthly_df["qty"], order=(1, 1, 1))
+    model_fit = model.fit()
+
+    forecast_steps = 12  # Forecast for 12 months (2025)
+    forecast = model_fit.get_forecast(steps=forecast_steps)
+    forecast_df = forecast.summary_frame()
+    forecast_df["month"] = pd.date_range(start=monthly_df.index[-1] + pd.DateOffset(months=1), periods=forecast_steps, freq='MS')
+    forecast_df.rename(columns={"mean": "Forecast"}, inplace=True)
+
+    # === Combine historical + forecast ===
+    monthly_df_reset = monthly_df.reset_index()
+    all_data = pd.concat([
+        monthly_df_reset.rename(columns={"qty": "Quantity"}),
+        forecast_df[["month", "Forecast"]].rename(columns={"month": "month"})
+    ], ignore_index=True)
+
+    st.subheader(f"📅 Forecasted Stock Trends for: {selected_desc}")
+    fig = px.line(all_data, x="month", y=["Quantity", "Forecast"], markers=True,
+                  title=f"📦 Stock Forecast (ARIMA) - {selected_desc}",
+                  labels={"value": "Quantity", "month": "Month-Year", "variable": "Type"})
     st.plotly_chart(fig, use_container_width=True)
+
 
 # === Forecast Next Month Stock for 2024 and 2025 ===
 df["txndate"] = pd.to_datetime(df["txndate"])
