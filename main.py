@@ -303,8 +303,9 @@ forecast_df_2025 = pd.DataFrame(forecast_data_2025).sort_values("forecast_qty_20
 
 # Plotting the donut chart for predicted 2025 consumption patterns
 fig = px.pie(
+    names = usage_counts_2024.index[-5:]
+    values = forecast_df_2025.loc[names, 'description']
 
-    values=forecast_df_2025['forecast_qty_2025'],
     color_discrete_sequence=["sea green", "orange", "purple", "blue", "red", "pink"]
 )
 
