@@ -276,7 +276,7 @@ with col2:
 with col3:
     st.markdown(
         """
-        <div style="margin-top:20px; padding:10px; background-color:#f4f4f4; border-radius:8px; font-weight:bold; text-align:center;">
+        <div style="margin-top:20px; padding:8px; background-color:#f4f4f4; border-radius:6px; font-weight:bold; text-align:center;">
            <h3 style="color: black;">📦 Top 10 Consumption Patterns (2025 Prediction)</h3> 
         </div>
         """,
