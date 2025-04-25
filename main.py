@@ -6,12 +6,13 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 from statsmodels.tsa.arima.model import ARIMA
 import json
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestRegressor
 import os
 
 # === Streamlit Config ===
 st.set_page_config(layout="wide")
 st.title("📊 Supply Chain Forecasting Dashboard")
-
 
 
 # === Sidebar Navigation Styling ===
@@ -33,21 +34,7 @@ with open(file_path, "r") as f:
 
 df = pd.DataFrame(data["items"])
 
-import pandas as pd
-import streamlit as st
-from statsmodels.tsa.arima.model import ARIMA
-import numpy as np
 
-# Sample data for illustration
-# df = pd.DataFrame(data["items"])
-
-import pandas as pd
-import streamlit as st
-from statsmodels.tsa.arima.model import ARIMA
-import numpy as np
-
-# Sample data for illustration
-# df = pd.DataFrame(data["items"])
 
 # === Preprocessing ===
 df["txndate"] = pd.to_datetime(df["txndate"])
@@ -64,95 +51,86 @@ df["description"] = df["description"].astype(str)
 df_2024 = df[(df["year"] == 2024)]
 df_2025 = df[(df["year"] == 2025)]
 
-# === Sidebar: Key Points ===
-import pandas as pd
-import streamlit as st
-from sklearn.ensemble import RandomForestRegressor
-
-
 
 # === Use Only Data from 2024 ===
 df_2024 = df[df["year"] == 2024]
 
-# === Sidebar: Key Points ===
-st.sidebar.subheader("Key Points")
-
-# === Helper Function: Create Lag Features ===
-def create_lag_features(df, lags=[1, 2, 3]):
-    df = df.copy()
-    for lag in lags:
-        df[f"lag_{lag}"] = df["lead_time_stock"].shift(lag)
-    return df.dropna()
-
-# === Forecasting 2025 (12 months) ===
-forecasted_items = []
-
-# Loop through each unique item in 2024 data to forecast stock levels for 2025
-for item in df_2024["description"].unique():
-    item_df = df_2024[df_2024["description"] == item].sort_values("txndate")
-    item_df = create_lag_features(item_df)
-
-    if len(item_df) < 3:
-        continue  # Skip items with insufficient data
-
-    X = item_df[[f"lag_{i}" for i in [1, 2, 3]]]
-    y = item_df["lead_time_stock"]
-
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-
-    # Use last known lags from 2024 to forecast future stock in 2025
-    last_known_lags = list(X.iloc[-1])
-
-    # Forecast the next 12 months (simulating monthly predictions for 2025)
-    forecast_horizon = 12
-    for month in range(forecast_horizon):
-        prediction = model.predict([last_known_lags])[0]
-
-        if prediction < 100:  # If stock is forecasted to be low
-            forecasted_items.append({
-                "description": item,
-                "predicted_stock": prediction,
-                "forecast_month": 2025 + month // 12  # Forecast Year (2025)
-            })
-
-        # Update lags for the next month prediction
-        last_known_lags = [prediction] + last_known_lags[:2]  # Shift lags
 
 
 
 
-# Customer Demand Prediction (for 2025)
-with st.sidebar.expander("🔮 Customer Demand Prediction (2025)"):
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+# Assuming 'df' is already preprocessed
+
+
+
+
+
+
+
+with st.sidebar.expander("📊 Inventory Analysis"):
+    # Combine both 2024 and 2025 data
+    combined_df = pd.concat([df_2024, df_2025])
+
+    # Convert txndate to datetime if not already
+    combined_df["txndate"] = pd.to_datetime(combined_df["txndate"])
+
+    # Group by 'major', 'description', and 'fabtype' to calculate sum of stockvalue and qty, aging columns
+    inventory_summary = (
+        combined_df.groupby(["major", "description", "fabtype"])[["stockvalue", "qty", "aging_60", "aging_90", "aging_180", "aging_180plus"]]
+        .sum()
+        .reset_index()
+    )
+
+    # Remove aging columns that are not needed
+    inventory_summary = inventory_summary.drop(columns=["aging_60", "aging_90", "aging_180", "aging_180plus"])
+
+    # Forecast stock values for 2025 based on 'fabtype'
     forecast_data = []
-    for desc in df_2024["description"].unique():
-        item_df = df_2024[df_2024["description"] == desc]
-        monthly_series = item_df.resample("M", on="txndate")["qty"].sum().fillna(0)
+    
+    for fabtype in inventory_summary["fabtype"].unique():
+        fabtype_df = inventory_summary[inventory_summary["fabtype"] == fabtype]
         
-        if len(monthly_series) >= 6:  # Need at least 6 months of data for ARIMA
-            try:
-                model = ARIMA(monthly_series, order=(1, 1, 1))
-                model_fit = model.fit()
-                forecast = model_fit.forecast(steps=12)
-                total_forecast = forecast.sum()  # Total demand forecast for the next 12 months (for 2025)
-                forecast_data.append({"description": desc, "forecast_qty": total_forecast})
-            except Exception as e:
-                st.write(f"Error forecasting {desc}: {str(e)}")
-                continue
+        for _, row in fabtype_df.iterrows():
+            # For each item, create a time series forecast
+            item_df = combined_df[combined_df["description"] == row["description"]]
+            item_monthly_series = item_df.resample("M", on="txndate")["stockvalue"].sum().fillna(0)
+            
+            if len(item_monthly_series) >= 6:  # At least 6 months of data for ARIMA
+                try:
+                    model = ARIMA(item_monthly_series, order=(1, 1, 1))  # ARIMA model parameters can be tuned
+                    model_fit = model.fit()
+                    forecast = model_fit.forecast(steps=12)  # Forecast next 12 months (for 2025)
+                    total_forecast = forecast.sum()  # Total forecasted stock value for the next 12 months (2025)
+                    
+                    forecast_data.append({
+                        "fabtype": fabtype,
+                        "description": row["description"],
+                        "forecast_stockvalue_2025": total_forecast
+                    })
+                except Exception as e:
+                    st.write(f"Error forecasting {row['description']} with fabtype {fabtype}: {str(e)}")
+                    continue
 
-    # Prepare forecast data for display
+    # Prepare the forecast data for display
     if forecast_data:
-        forecast_df = pd.DataFrame(forecast_data).sort_values("forecast_qty", ascending=False).head(10)
-        st.write("Top 10 predicted items based on customer demand for the next 12 months (2025):")
+        forecast_df = pd.DataFrame(forecast_data)
+        st.write("📈 **2025 Stock Value Forecast for Top Items by Fab Type:**")
         st.dataframe(forecast_df)
 
-# Inventory Analysis (for both 2024 and 2025 data)
-with st.sidebar.expander("📊 Inventory Analysis"):
-    # Combine both 2024 and 2025 data for inventory analysis
-    combined_df = pd.concat([df_2024, df_2025])
-    top_items = combined_df.groupby("description")["qty"].sum().reset_index().sort_values("qty", ascending=False).head(5)
-    st.write("Top 5 Items by Stock Quantity:")
-    st.dataframe(top_items)
+    # Sort by stockvalue and select the top 5 items
+    top_inventory = inventory_summary.sort_values("stockvalue", ascending=False).head(5)
+
+    # Remove the 'inventory_item_id' column if it exists in the summary
+    if 'inventory_item_id' in top_inventory.columns:
+        top_inventory = top_inventory.drop(columns=['inventory_item_id'])
+  
+
+
 
 import streamlit as st
 from sklearn.linear_model import LinearRegression
@@ -231,6 +209,86 @@ col3.markdown(card_style.format(
     icon="⏳", title="Avg Stock Age (2024)", value=f"{avg_stock_age:.2f} days"
 ), unsafe_allow_html=True)
 
+
+
+
+
+# === Filter Data for 2024 ===
+df_2024 = df[df["year"] == 2024]
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+# Assuming df_2024 is already loaded
+
+# Calculate the total monthly demand for 2024
+df_2024_monthly = df_2024.groupby("year_month").agg(
+    total_demand=("daily_demand", "sum")
+).reset_index()
+
+# Convert 'year_month' to datetime for feature creation
+df_2024_monthly['year_month'] = pd.to_datetime(df_2024_monthly['year_month'])
+
+# Extract additional time-based features (Month and Day of Year)
+df_2024_monthly['month'] = df_2024_monthly['year_month'].dt.month
+df_2024_monthly['day_of_year'] = df_2024_monthly['year_month'].dt.dayofyear
+
+# Features and target variable
+X = df_2024_monthly[['month', 'day_of_year']]
+y = df_2024_monthly['total_demand']
+
+# Split the data into train and test sets (optional, for validation)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# === Train Random Forest Regressor ===
+rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+rf_model.fit(X_train, y_train)
+
+# === Forecast for 2025 ===
+# Generate features for the 12 months of 2025 (we'll use the same features as 2024)
+forecast_2025 = pd.DataFrame({
+    'month': list(range(1, 13)),
+    # Ensure day_of_year is calculated correctly for 2025, mapping each month to a unique day of year value
+    'day_of_year': [pd.to_datetime(f'2025-{month:02d}-01').dayofyear for month in range(1, 13)]
+})
+
+# Predict demand for 2025
+forecast_2025['predicted_demand'] = rf_model.predict(forecast_2025[['month', 'day_of_year']])
+
+# === Streamlit Visualization ===
+# Create bar traces for 2024 demand
+trace_2024 = go.Bar(
+    x=df_2024_monthly['year_month'].dt.strftime('%b %Y'),
+    y=df_2024_monthly["total_demand"],
+    name='2024 Demand',
+    opacity=0.7
+)
+
+# Create bar traces for forecasted 2025 demand
+trace_2025 = go.Bar(
+    x=pd.date_range(start='2025-01-01', periods=12, freq='M').strftime('%b %Y'),
+    y=forecast_2025['predicted_demand'],
+    name='Forecasted 2025 Demand',
+    opacity=0.7,
+    marker=dict(color='orange')
+)
+
+# Set up the layout for the graph
+layout = go.Layout(
+    title="Price Sensitivity Forecasting: Actual vs Forecasted Demand (2024 vs 2025)",
+    xaxis=dict(title="Month", tickangle=45),
+    yaxis=dict(title="Demand"),
+    barmode='group',
+    showlegend=True
+)
+
+# Create the figure and plot it
+fig = go.Figure(data=[trace_2024, trace_2025], layout=layout)
+
+# Use Streamlit to display the plot
+st.plotly_chart(fig, use_container_width=True)
 
 
 
@@ -392,10 +450,6 @@ with col3:
 
 
 
-
-
-
-
 # Your existing code
 st.subheader("🔥 Top Trending Items ")
 
@@ -412,46 +466,7 @@ st.plotly_chart(fig8, use_container_width=True)
 
 
 
-# === Prediction for 2025 Inventory Demand ===
-st.subheader("🔮 2025 Forecast: Items Likely to Be Bought Again")
 
-# Get top 50 items from 2024 and 2025 to apply prediction
-top_items = df.groupby("description")["qty"].sum().sort_values(ascending=False).head(50).index
-
-forecast_data = []
-for desc in top_items:
-    item_df = df[df["description"] == desc]
-    monthly_series = item_df.resample("M", on="txndate")["qty"].sum()
-    monthly_series = monthly_series.fillna(0)
-    
-    # Ensure we have at least 6 months of data for prediction
-    if len(monthly_series) >= 6:  # Minimum months of data
-        try:
-            model = ARIMA(monthly_series, order=(1, 1, 1))
-            model_fit = model.fit()
-            forecast = model_fit.forecast(steps=12)  # Predict 12 months of 2025
-            
-            # Sum the forecast to get the total quantity for 2025
-            total_forecast_2025 = forecast.sum()
-            
-            # Append the prediction to the forecast data list
-            forecast_data.append({"description": desc, "forecast_qty": total_forecast_2025})
-        except Exception as e:
-            # Continue if the model fails for a particular item
-            print(f"Error forecasting item {desc}: {e}")
-            continue
-
-# Create DataFrame for forecasted data
-forecast_df = pd.DataFrame(forecast_data)
-forecast_df = forecast_df.sort_values("forecast_qty", ascending=False).head(20)
-
-# Plotting the forecasted items chart
-fig2 = px.bar(forecast_df, x="forecast_qty", y="description", color="forecast_qty", orientation="h",
-              title="📦 Predicted Top Items for 2025", labels={"forecast_qty": "Forecasted Qty", "description": "Item"})
-fig2.update_layout(yaxis={'categoryorder': 'total ascending'})
-
-# Plotting the second chart (forecast for 2025)
-st.plotly_chart(fig2, use_container_width=True)
 
 
 
