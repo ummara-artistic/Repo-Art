@@ -168,24 +168,48 @@ data_2024["predicted_qty_2025"] = predictions_2025
 # === Display Predictions ===
 import streamlit as st
 
-# Display KPIs for 2024
-col1, col2, col3 = st.columns(3)
-
-# === KPI Metrics for 2024 ===
-total_stock = data_2024["qty"].sum()
-total_value = data_2024["stockvalue"].sum() if "stockvalue" in data_2024.columns else 0
-avg_stock_age = data_2024[["aging_60", "aging_90", "aging_180", "aging_180plus"]].sum(axis=1).mean() if all(col in data_2024.columns for col in ["aging_60", "aging_90", "aging_180", "aging_180plus"]) else 0
-
-# === Forecast for 2025 ===
-# Use the model to predict quantities for 2025
-predictions_2025 = model.predict(X_2024)
-
-# Add predictions to the 2024 data (forecast for 2025)
-data_2024["predicted_qty_2025"] = predictions_2025
-
-# === Display KPIs and Predictions ===
+from sklearn.ensemble import RandomForestRegressor  # For example, using Random Forest
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import pandas as pd
 import streamlit as st
 
+# Sample data preprocessing for training (replace with your actual data)
+# Assuming `data_2024` has necessary features like 'qty', 'stockvalue', 'aging_60', etc.
+
+# Prepare the features and target variables for training
+features = ["qty", "stockvalue", "aging_60", "aging_90", "aging_180", "aging_180plus"]  # Add more features as needed
+X = data_2024[features]  # Features for prediction
+y_qty = data_2024["qty"]  # Target: Quantity
+y_value = data_2024["stockvalue"]  # Target: Stock value
+y_age = data_2024[["aging_60", "aging_90", "aging_180", "aging_180plus"]].sum(axis=1)  # Target: Stock age
+
+# Split the data into training and testing sets
+X_train, X_test, y_train_qty, y_test_qty = train_test_split(X, y_qty, test_size=0.2, random_state=42)
+X_train_value, X_test_value, y_train_value, y_test_value = train_test_split(X, y_value, test_size=0.2, random_state=42)
+X_train_age, X_test_age, y_train_age, y_test_age = train_test_split(X, y_age, test_size=0.2, random_state=42)
+
+# Initialize the model (Random Forest)
+model_qty = RandomForestRegressor(n_estimators=100, random_state=42)
+model_value = RandomForestRegressor(n_estimators=100, random_state=42)
+model_age = RandomForestRegressor(n_estimators=100, random_state=42)
+
+# Train the models
+model_qty.fit(X_train, y_train_qty)
+model_value.fit(X_train, y_train_value)
+model_age.fit(X_train, y_train_age)
+
+# Make predictions for 2025
+predictions_2025_qty = model_qty.predict(X)  # Predict quantity for 2025
+predictions_2025_value = model_value.predict(X)  # Predict value for 2025
+predictions_2025_age = model_age.predict(X)  # Predict age for 2025
+
+# Add predictions to the data
+data_2024["predicted_qty_2025"] = predictions_2025_qty
+data_2024["predicted_value_2025"] = predictions_2025_value
+data_2024["predicted_age_2025"] = predictions_2025_age
+
+# === Display KPIs and Predictions ===
 col1, col2, col3 = st.columns([1, 1, 1])
 
 card_style = """
@@ -197,18 +221,18 @@ card_style = """
 </div>
 """
 
+# Display forecasted KPIs for 2025
 col1.markdown(card_style.format(
-    icon="📦", title="Total Stock Quantity (2024)", value=f"{total_stock:,.2f}"
+    icon="📦", title="Predicted Total Stock Quantity (2025)", value=f"{data_2024['predicted_qty_2025'].sum():,.2f}"
 ), unsafe_allow_html=True)
 
 col2.markdown(card_style.format(
-    icon="💰", title="Total Inventory Value (2024)", value=f"{total_value:,.2f}"
+    icon="💰", title="Predicted Inventory Value (2025)", value=f"{data_2024['predicted_value_2025'].sum():,.2f}"
 ), unsafe_allow_html=True)
 
 col3.markdown(card_style.format(
-    icon="⏳", title="Avg Stock Age (2024)", value=f"{avg_stock_age:.2f} days"
+    icon="⏳", title="Predicted Avg Stock Age (2025)", value=f"{data_2024['predicted_age_2025'].mean():.2f} days"
 ), unsafe_allow_html=True)
-
 
 
 
