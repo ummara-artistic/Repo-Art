@@ -168,48 +168,25 @@ data_2024["predicted_qty_2025"] = predictions_2025
 # === Display Predictions ===
 import streamlit as st
 
-from sklearn.ensemble import RandomForestRegressor  # For example, using Random Forest
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-import pandas as pd
-import streamlit as st
+# Display KPIs for 2024
+col1, col2, col3 = st.columns(3)
 
-# Sample data preprocessing for training (replace with your actual data)
-# Assuming `data_2024` has necessary features like 'qty', 'stockvalue', 'aging_60', etc.
+# === KPI Metrics for 2024 ===
+# === Forecast for 2025 ===
+# Calculate total stock, value, and average stock age for the 2024 data
+total_stock = data_2024["qty"].sum()
+total_value = data_2024["stockvalue"].sum() if "stockvalue" in data_2024.columns else 0
+avg_stock_age = data_2024[["aging_60", "aging_90", "aging_180", "aging_180plus"]].sum(axis=1).mean() if all(col in data_2024.columns for col in ["aging_60", "aging_90", "aging_180", "aging_180plus"]) else 0
 
-# Prepare the features and target variables for training
-features = ["qty", "stockvalue", "aging_60", "aging_90", "aging_180", "aging_180plus"]  # Add more features as needed
-X = data_2024[features]  # Features for prediction
-y_qty = data_2024["qty"]  # Target: Quantity
-y_value = data_2024["stockvalue"]  # Target: Stock value
-y_age = data_2024[["aging_60", "aging_90", "aging_180", "aging_180plus"]].sum(axis=1)  # Target: Stock age
+# Use the model to predict quantities for 2025
+predictions_2025 = model.predict(X_2024)
 
-# Split the data into training and testing sets
-X_train, X_test, y_train_qty, y_test_qty = train_test_split(X, y_qty, test_size=0.2, random_state=42)
-X_train_value, X_test_value, y_train_value, y_test_value = train_test_split(X, y_value, test_size=0.2, random_state=42)
-X_train_age, X_test_age, y_train_age, y_test_age = train_test_split(X, y_age, test_size=0.2, random_state=42)
-
-# Initialize the model (Random Forest)
-model_qty = RandomForestRegressor(n_estimators=100, random_state=42)
-model_value = RandomForestRegressor(n_estimators=100, random_state=42)
-model_age = RandomForestRegressor(n_estimators=100, random_state=42)
-
-# Train the models
-model_qty.fit(X_train, y_train_qty)
-model_value.fit(X_train, y_train_value)
-model_age.fit(X_train, y_train_age)
-
-# Make predictions for 2025
-predictions_2025_qty = model_qty.predict(X)  # Predict quantity for 2025
-predictions_2025_value = model_value.predict(X)  # Predict value for 2025
-predictions_2025_age = model_age.predict(X)  # Predict age for 2025
-
-# Add predictions to the data
-data_2024["predicted_qty_2025"] = predictions_2025_qty
-data_2024["predicted_value_2025"] = predictions_2025_value
-data_2024["predicted_age_2025"] = predictions_2025_age
+# Add predictions to the 2024 data (forecast for 2025)
+data_2024["predicted_qty_2025"] = predictions_2025
 
 # === Display KPIs and Predictions ===
+import streamlit as st
+
 col1, col2, col3 = st.columns([1, 1, 1])
 
 card_style = """
@@ -227,12 +204,14 @@ col1.markdown(card_style.format(
 ), unsafe_allow_html=True)
 
 col2.markdown(card_style.format(
-    icon="💰", title="Predicted Inventory Value (2025)", value=f"{data_2024['predicted_value_2025'].sum():,.2f}"
+    icon="💰", title="Predicted Inventory Value (2025)", value=f"{total_value:,.2f}"  # Assuming value remains the same for forecast
 ), unsafe_allow_html=True)
 
 col3.markdown(card_style.format(
-    icon="⏳", title="Predicted Avg Stock Age (2025)", value=f"{data_2024['predicted_age_2025'].mean():.2f} days"
+    icon="⏳", title="Avg Stock Age (2025)", value=f"{avg_stock_age:.2f} days"  # Assuming avg stock age remains the same for forecast
 ), unsafe_allow_html=True)
+
+
 
 
 
@@ -335,12 +314,7 @@ def make_donut_chart(names, values, colors):
     )
     return fig
 
-import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
-import numpy as np
-import pandas as pd
-from statsmodels.tsa.arima.model import ARIMA
+
 
 # Define the donut chart creation function (assuming this is already defined)
 def make_donut_chart(names, values, colors):
@@ -500,61 +474,69 @@ st.plotly_chart(fig8, use_container_width=True)
 
 
 
-    # Rank majors within each month to only show top N in animation for 2024 and 2025
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import streamlit as st
+
 top_n = 10
 
-# Filter the data for 2024 and 2025
-df_filtered = df[df["year"].isin([2024, 2025])]
+# Step 1: Filter only 2024 data
+df_2024 = df[df["year"] == 2024].copy()
+df_2024["year_month"] = df_2024["txndate"].dt.to_period("M")
 
-# Aggregate stockvalue per month and major category
-df_filtered["year_month"] = df_filtered["txndate"].dt.to_period("M")
-monthly_major_stock = (
-    df_filtered.groupby(["year_month", "major"])["stockvalue"]
-    .sum()
+# Step 2: Aggregate monthly average stock value per major
+monthly_avg = (
+    df_2024.groupby(["major", df_2024["txndate"].dt.month])["stockvalue"]
+    .mean()
     .reset_index()
+    .rename(columns={"txndate": "month", "stockvalue": "avg_stockvalue"})
 )
 
-# Rank the major categories within each month
-monthly_major_stock["rank"] = monthly_major_stock.groupby("year_month")["stockvalue"].rank("dense", ascending=False)
+# Step 3: Build predicted 2025 data using 2024 monthly average
+predicted_2025 = []
+for month in range(1, 13):
+    month_str = f"2025-{month:02d}"
+    temp_df = monthly_avg[monthly_avg["month"] == month].copy()
+    temp_df["year_month"] = pd.Period(month_str)
+    temp_df["stockvalue"] = temp_df["avg_stockvalue"]
+    predicted_2025.append(temp_df[["major", "year_month", "stockvalue"]])
 
-# Filter to include only the top N major categories within each month
-monthly_major_stock = monthly_major_stock[monthly_major_stock["rank"] <= top_n]
+predicted_2025_df = pd.concat(predicted_2025, ignore_index=True)
 
-# Plotly Animated Bar Chart for Top N Major Categories by Stock Value Over Time
+# Step 4: Rank majors within each 2025 month
+predicted_2025_df["rank"] = predicted_2025_df.groupby("year_month")["stockvalue"].rank("dense", ascending=False)
+
+# Step 5: Filter top N per month
+top_predicted = predicted_2025_df[predicted_2025_df["rank"] <= top_n]
+
+# Step 6: Plot animated bar chart
 fig = px.bar(
-    monthly_major_stock,
+    top_predicted,
     x="stockvalue",
     y="major",
     color="major",
     orientation="h",
-    animation_frame="year_month",
-    range_x=[0, monthly_major_stock["stockvalue"].max() * 1.1],
-    title=f"Top {top_n} Major Categories by Stock Value Over Time",
-    labels={"stockvalue": "Stock Value", "major": "Category"},
+    animation_frame=top_predicted["year_month"].astype(str),
+    range_x=[0, top_predicted["stockvalue"].max() * 1.1],
+    title=f"Predicted Top {top_n} Major Categories by Stock Value (2025)",
+    labels={"stockvalue": "Predicted Stock Value", "major": "Category"},
     height=600
 )
 
-# Customize the layout of the chart
 fig.update_layout(
     yaxis={'categoryorder': 'total ascending'},
     showlegend=False,
-    xaxis_title="Stock Value",
+    xaxis_title="Predicted Stock Value",
     yaxis_title="Major Category"
 )
 
-# Display the chart
+# Display chart
 st.plotly_chart(fig, use_container_width=True)
 
 
 
 
-
-
-import pandas as pd
-import plotly.graph_objects as go
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.model_selection import train_test_split
-import streamlit as st
 
 # === Preprocess Data for 2024 (No 2025 data) ===
 df["txndate"] = pd.to_datetime(df["txndate"])
@@ -624,19 +606,7 @@ def fit_arima_model(item_df_grouped):
 
 
 
-# === Preprocess for 2024 and 2025 ===
-df["txndate"] = pd.to_datetime(df["txndate"])
-df["description"] = df["description"].astype(str)
-df["year"] = df["txndate"].dt.year  # Extract year from transaction date
-df["month"] = df["txndate"].dt.strftime("%b")  # Month abbreviation (Jan, Feb)
-df = df[df["year"].isin([2024, 2025])]  # Filter data to include only 2024 and 2025
-df.sort_values("txndate", inplace=True)
 
-import pandas as pd
-import plotly.express as px
-import streamlit as st
-from statsmodels.tsa.arima.model import ARIMA
-import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings("ignore")
