@@ -162,14 +162,14 @@ with st.sidebar.expander("📊 Inventory Analysis"):
             animation_frame="fabtype",
             orientation="h",
             range_x=[0, animated_df["forecast_stockvalue_2025"].max() * 1.2],
-            title=" Top 5 Items by Fab Type for 2025",
+            title=" Top 50 Items by Fab Type for 2025",
             labels={"forecast_stockvalue_2025": "Forecasted Stock Value", "description": "Item"},
             height=600
         )
         st.plotly_chart(fig_forecast_anim, use_container_width=True)
 
     # Sort by stockvalue and select the top 5 items
-    top_inventory = inventory_summary.sort_values("stockvalue", ascending=False).head(5)
+    top_inventory = inventory_summary.sort_values("stockvalue", ascending=False).head(50)
 
     # Remove the 'inventory_item_id' column if it exists in the summary
     if 'inventory_item_id' in top_inventory.columns:
