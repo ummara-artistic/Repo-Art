@@ -161,7 +161,7 @@ with st.sidebar.expander("📊 Inventory Analysis"):
             color="description",
             animation_frame="fabtype",
             orientation="h",
-            range_x=[0, animated_df["forecast_stockvalue_2025"].max() * 1.2],
+            range_x=[0, animated_df["forecast_stockvalue_2025"].max() * 1.4],
             title=" Top 50 Items by Fab Type for 2025",
             labels={"forecast_stockvalue_2025": "Forecasted Stock Value", "description": "Item"},
             height=600
@@ -227,28 +227,38 @@ data_2024["predicted_qty_2025"] = predictions_2025
 
 col1, col2, col3 = st.columns([1, 1, 1])
 
-card_style = """
-<div style="background-color:#f4f4f4; width: 100%; padding:10px; 
-            border-radius:12px; box-shadow:0 4px 8px rgba(0, 0, 0, 0.1); 
-            text-align:center;">
-    <h3 style="margin-bottom: 5px;">{icon} {title}</h3>
-    <p style="font-size: 26px; font-weight: bold; margin: 0;">{value}</p>
+card_template = """
+<div style="
+    background-color:#f9f9f9; 
+    padding: 20px; 
+    border-radius: 10px; 
+    box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);
+    text-align:center;
+    font-family:sans-serif;
+">
+    <h4 style="margin-bottom: 10px;">{icon} {title}</h4>
+    <p style="font-size: 28px; font-weight: bold; color: #333;">{value}</p>
 </div>
 """
 
-# Display forecasted KPIs for 2025
-col1.markdown(card_style.format(
-    icon="📦", title="Predicted Total Stock Quantity (2025)", value=f"{data_2024['predicted_qty_2025'].sum():,.2f}"
+# Display each KPI card
+col1.markdown(card_template.format(
+    icon="📦",
+    title="Predicted Stock Qty (2025)",
+    value=f"{data_2024['predicted_qty_2025'].sum():,.0f}"
 ), unsafe_allow_html=True)
 
-col2.markdown(card_style.format(
-    icon="💰", title="Predicted Inventory Value (2025)", value=f"{total_value:,.2f}"  # Assuming value remains the same for forecast
+col2.markdown(card_template.format(
+    icon="💰",
+    title="Predicted Inventory Value (2025)",
+    value=f"${total_value:,.2f}"  # Assuming it remains the same
 ), unsafe_allow_html=True)
 
-col3.markdown(card_style.format(
-    icon="⏳", title="Avg Stock Age (2025)", value=f"{avg_stock_age:.2f} days"  # Assuming avg stock age remains the same for forecast
+col3.markdown(card_template.format(
+    icon="⏳",
+    title="Avg Stock Age",
+    value=f"{avg_stock_age:.1f} days"
 ), unsafe_allow_html=True)
-
 
 
 
@@ -305,6 +315,7 @@ trace_2025 = go.Bar(
 )
 layout1 = go.Layout(
     title="Demand Forecast: 2024 vs 2025",
+    
     xaxis=dict(title="Month", tickangle=45),
     yaxis=dict(title="Demand"),
     barmode='group'
@@ -318,6 +329,7 @@ layout = go.Layout(
     barmode='group',
     showlegend=True
 )
+
 
 # Create the figure and plot it
 fig = go.Figure(data=[trace_2024, trace_2025], layout=layout)
@@ -384,80 +396,95 @@ with row1_col2:
 
 
     
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+import streamlit as st
 
 # Layout Row 2: Usage Patterns & Top 5 Forecast (2025)
 row2_col1, row2_col2 = st.columns(2)
 
-with row2_col1:
-    st.markdown("<h4 style='text-align:center;'>📦 Consumption Patterns (2024) - Bubble Chart</h4>", unsafe_allow_html=True)
-
-    # Categorize usage_type
-    df_2024["usage_type"] = np.select(
-        [
-            df_2024["qty"] == 0,
-            df_2024["qty"] < 10,
-            (df_2024["qty"] >= 10) & (df_2024["qty"] < 50),
-            df_2024["qty"] >= 50,
-        ],
-        ["Dead - (Qty = 0)", "Slow - (Qty < 10)", "Sporadic - (Qty >=10 )", "Recurring - (Qty >= 50)"],
-        default="New",
-    )
-
-    # Ensure txndate is datetime
-    df_2024["txndate"] = pd.to_datetime(df_2024["txndate"])
-
-    # Group by month and usage_type
-    df_2024["month"] = df_2024["txndate"].dt.to_period("M").dt.to_timestamp()
-    usage_trend = df_2024.groupby(["month", "usage_type"])["qty"].sum().reset_index()
-
-    # Bubble chart
-    fig_bubble = px.scatter(
-        usage_trend,
-        x="month",
-        y="usage_type",
-        size="qty",
-        color="usage_type",
-        size_max=60,
-   
-        labels={"month": "Month", "qty": "Quantity", "usage_type": "Usage Type"}
-    )
-
-    fig_bubble.update_layout(
-        height=450,
-        xaxis=dict(dtick="M1", tickformat="%b"),
-        yaxis=dict(title="Usage Type"),
-        legend_title="Usage Type"
-    )
-
-    st.plotly_chart(fig_bubble, use_container_width=True)
 
 
-with row2_col2:
-    st.markdown("<h4 style='text-align:center;'>📦 Top 5 Consumption Predictions (2025)</h4>", unsafe_allow_html=True)
-    forecast_data_2025 = []
-    for desc in df["description"].unique():
-        item_df = df[df["description"] == desc]
-        monthly_series = item_df.resample("M", on="txndate")["qty"].sum().fillna(0)
-        if len(monthly_series) >= 6:
-            try:
-                model = ARIMA(monthly_series, order=(1, 1, 1))
-                model_fit = model.fit()
-                forecast = model_fit.forecast(steps=12)
+
+
+
+
+
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from statsmodels.tsa.arima.model import ARIMA
+
+st.markdown("<h4 style='text-align:center;'>📦 Top 100 Monthly Consumption Predictions (2025)</h4>", unsafe_allow_html=True)
+
+# Step 1: Filter for 2024 data
+df_2024 = df[(df["txndate"] >= "2024-01-01") & (df["txndate"] <= "2024-12-31")]
+
+# Step 2: Initialize forecast results
+forecast_data_2025 = []
+
+# Step 3: Loop through each product and forecast 12 months
+for desc in df_2024["description"].unique():
+    item_df = df_2024[df_2024["description"] == desc]
+    monthly_series = item_df.resample("M", on="txndate")["qty"].sum().fillna(0)
+
+    if len(monthly_series) >= 6:
+        try:
+            model = ARIMA(monthly_series, order=(1, 1, 1))
+            model_fit = model.fit()
+            forecast = model_fit.forecast(steps=12)
+            forecast_months = pd.date_range(start="2025-01-01", periods=12, freq="M")
+
+            for date, qty in zip(forecast_months, forecast):
                 forecast_data_2025.append({
                     "description": desc,
-                    "forecast_qty_2025": forecast.sum()
+                    "month": date.strftime("%Y-%m"),
+                    "forecast_qty": qty
                 })
-            except:
-                continue
-    forecast_df_2025 = pd.DataFrame(forecast_data_2025).sort_values("forecast_qty_2025", ascending=False).head(5)
-    fig_top5 = px.pie(
-        names=forecast_df_2025['description'],
-        values=forecast_df_2025['forecast_qty_2025'],
-        hole=0.4,
-        color_discrete_sequence=["sea green", "orange", "purple", "blue", "red"]
-    )
-    fig_top5.update_traces(textinfo="label+percent", insidetextorientation="radial")
-    st.plotly_chart(fig_top5, use_container_width=True)
+        except:
+            continue
+
+# Step 4: Create DataFrame of all forecasts
+forecast_df_2025 = pd.DataFrame(forecast_data_2025)
+
+# Step 5: Select top 100 items by total forecasted quantity for 2025
+top_100 = (
+    forecast_df_2025.groupby("description")["forecast_qty"]
+    .sum()
+    .nlargest(100)
+    .index
+)
+
+top_100_df = forecast_df_2025[forecast_df_2025["description"].isin(top_100)]
+
+# Step 6: Plot animated bar chart
+fig_animated = px.bar(
+    top_100_df,
+    x="description",
+    y="forecast_qty",
+    animation_frame="month",
+    color="forecast_qty",
+    color_continuous_scale="Cividis",
+    title="Top 100 Monthly Forecasted Consumptions for 2025"
+)
+
+fig_animated.update_layout(
+    xaxis={'categoryorder': 'total descending'},
+    xaxis_title="Item Description",
+    yaxis_title="Forecasted Quantity",
+    template="plotly_white",
+    height=600
+)
+
+fig_animated.update_traces(marker_line_width=0.5, marker_line_color="gray")
+
+# Step 7: Show chart
+st.plotly_chart(fig_animated, use_container_width=True)
+
+
 
 
 
