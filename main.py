@@ -570,14 +570,14 @@ with row1_col1:
 with row1_col2:
     st.plotly_chart(fig_bar, use_container_width=True)  # Bar chart
 
-# === 3. Search by Description ===
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from statsmodels.tsa.arima.model import ARIMA
 
-# === Subheader and Item Selection ===
-st.subheader("🔍 Search by Item Description")
+st.subheader("🔍 Trending Analysis 2025")
+
+# Assuming df is already loaded and contains all historical data
 desc_list = sorted(df["description"].dropna().unique())
 selected_desc = st.selectbox("Select Item", desc_list)
 
@@ -585,63 +585,79 @@ if selected_desc:
     item_df = df[df["description"] == selected_desc].copy()
     item_df["txndate"] = pd.to_datetime(item_df["txndate"])
 
-    # === Monthly Aggregation for Forecasting ===
+    # === Use All Available Data for Forecasting ===
     item_df["month"] = item_df["txndate"].dt.to_period("M").dt.to_timestamp()
     monthly_df = item_df.groupby("month")["qty"].sum().reset_index().sort_values("month")
 
-    # === ARIMA Forecasting ===
-    monthly_df.set_index("month", inplace=True)
-    model = ARIMA(monthly_df["qty"], order=(1, 1, 1))
-    model_fit = model.fit()
+    if len(monthly_df) >= 4:
+        monthly_df.set_index("month", inplace=True)
 
-    forecast_steps = 12
-    forecast = model_fit.get_forecast(steps=forecast_steps)
-    forecast_df = forecast.summary_frame()
-    forecast_df["month"] = pd.date_range(start=monthly_df.index[-1] + pd.DateOffset(months=1), periods=forecast_steps, freq='MS')
-    forecast_df.rename(columns={"mean": "Forecast"}, inplace=True)
-
-    # Combine historical + forecast
-    monthly_df_reset = monthly_df.reset_index()
-    all_data = pd.concat([
-        monthly_df_reset.rename(columns={"qty": "Quantity"}),
-        forecast_df[["month", "Forecast"]]
-    ], ignore_index=True)
-
-    # Plot ARIMA forecast
-    fig_trends = px.line(
-        all_data,
-        x="month",
-        y=["Quantity", "Forecast"],
-        markers=True,
-        title=f"📦 Stock Forecast (ARIMA) - {selected_desc}",
-        labels={"value": "Quantity", "month": "Month-Year", "variable": "Type"}
-    )
-
-    # === Forecast Next Month Requirement Logic ===
-    qty_series = item_df.groupby(item_df["txndate"].dt.to_period("M"))["qty"].sum()
-    qty_series.index = qty_series.index.to_timestamp()
-
-    if len(qty_series) >= 4:
-        model = ARIMA(qty_series, order=(1, 1, 1))
+        # === ARIMA Forecasting for 2025 (Full Year) ===
+        model = ARIMA(monthly_df["qty"], order=(1, 1, 1))
         model_fit = model.fit()
-        forecast = model_fit.forecast(steps=1)
 
-        next_month_qty = forecast.values[0]
-        current_stock = item_df["qty"].sum()
+        forecast_steps = 12  # Forecast for 12 months of 2025
+        forecast = model_fit.get_forecast(steps=forecast_steps)
+        forecast_df = forecast.summary_frame()
+        forecast_df["month"] = pd.date_range(start=monthly_df.index[-1] + pd.DateOffset(months=1), periods=forecast_steps, freq='MS')
+        forecast_df.rename(columns={"mean": "Forecast"}, inplace=True)
 
-        st.subheader("🔮 Prediction")
-        st.markdown(f"**Estimated Required Qty for Next Month:** `{int(next_month_qty)}`")
-        st.markdown(f"**Current Available Stock:** `{int(current_stock)}`")
+        # === Filter Only 2025 Forecast Data ===
+        forecast_df_2025 = forecast_df.copy()  # This is the forecast for 2025
 
-        # Probability Warnings
-        if current_stock <= next_month_qty:
-            st.error("⚠️ High probability this item will run out next month!")
-        elif current_stock - next_month_qty < 10:
-            st.warning("🟠 Low stock buffer, may run out soon.")
-        else:
-            st.success("✅ Stock level is sufficient for next month.")
+        # === Likelihood to Buy based on Stock Analysis ===
+        next_month_qty = forecast_df.iloc[0]["Forecast"]  # Quantity for January 2025
+        current_stock = item_df["qty"].sum()  # Total stock from all available data
+
+        st.subheader("🔮 Prediction Analysis")
+        st.markdown(f"**Estimated Required Qty for Jan 2025:** `{int(next_month_qty)}`")
+       
+
+        # Trend analysis for likelihood to buy
+        likelihood = "High" if current_stock <= next_month_qty else "Low"
+
+        # === Create Trend Graph for 2025 ===
+        trend_data = forecast_df_2025[["month", "Forecast"]].copy()
+        trend_data["Likely to Buy"] = trend_data["Forecast"].apply(lambda x: "High" if x < current_stock else "Low")
+
+        # Plotting the Forecast Trend Graph for 2025
+        fig_trend = px.line(
+            trend_data,
+            x="month",
+            y="Forecast",
+            color="Likely to Buy",
+            title=f"🔮 Trend & Likelihood to Buy for {selected_desc} (2025)",
+            labels={"month": "Month-Year", "Forecast": "Forecasted Quantity"},
+            markers=True,
+            color_discrete_map={"High": "green", "Low": "red"}
+        )
+
+        # Force the x-axis to show only the months of 2025
+        fig_trend.update_layout(
+            xaxis=dict(
+                tickmode="array",
+                tickvals=forecast_df_2025["month"],  # Only show months for 2025
+                ticktext=forecast_df_2025["month"].dt.strftime('%b %Y'),  # Show 2025 months (e.g., Jan 2025, Feb 2025)
+                title="Month-Year"
+            ),
+            yaxis=dict(title="Forecasted Quantity"),
+            title=f"🔮 Trend Analysis for {selected_desc} in 2025",
+            showlegend=True
+        )
+
+        # Ensure the x-axis shows only Jan-Dec 2025
+        fig_trend.update_xaxes(
+            range=[pd.Timestamp('2025-01-01'), pd.Timestamp('2025-12-31')]
+        )
+
+        st.plotly_chart(fig_trend, use_container_width=True)
+
     else:
-        st.info("📉 Not enough data for forecasting. Need at least 4 months of data.")
+        st.info("📉 Not enough data for forecasting. Minimum 4 months of records required.")
+
+
+
+
 
 # === Calculate Repurchase Likelihood for 2025 ===
 df["txndate"] = pd.to_datetime(df["txndate"])
@@ -668,18 +684,16 @@ fig = px.bar(
     y="description",
     color="description",
     orientation="h",
-    title="Top 20 Items Predicted to be Bought Again by Customers in 2025",
+
     labels={"predicted_2025_likelihood": "Predicted Repurchase Likelihood", "description": "Item Description"},
     height=600
 )
 
-# === Display Both Charts Side-by-Side ===
-row_col1, row_col2 = st.columns(2)
 
-with row_col1:
-    st.subheader(f"📅 Forecasted Stock Trends for: {selected_desc}")
-    st.plotly_chart(fig_trends, use_container_width=True)
 
-with row_col2:
-    st.subheader("📦 Top Repurchase Predictions for 2025")
-    st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("<h4 style='text-align:center;'>📦 Top 20 Items Predictions to be Bought again by Customers (2025)</h4>", unsafe_allow_html=True)
+st.plotly_chart(fig, use_container_width=True)
+
+
+    
