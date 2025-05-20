@@ -185,7 +185,7 @@ st.sidebar.markdown(f"---\n- **Total Forecast Qty (2025)**: {round(total_pred)} 
 
 with st.expander("KPIS"):
     st.markdown("""
-    # The first row contains three key visualizations laid out in three columns side by side.
+    #
 
     **r1c1: Quantity Over Time for 2025 (line chart)**  
     - Combines historical filtered data with predicted quantities based on monthly averages.  
@@ -441,40 +441,126 @@ forecast_df = pd.DataFrame(forecast_results).sort_values(by="predicted_2025_qty"
 
 
 # Create three columns
+# ==== Page Title ====
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from statsmodels.tsa.arima.model import ARIMA
+
+# ==== Page Title ====
+
+
+# ==== Define Layout ====
 row1_col1, row1_col2, row1_col3 = st.columns(3)
 
-# Plot inside row1_col1
+# ==== Select Filters ====
+col1, col2 = st.columns(2)
+aging_options = ['aging_60', 'aging_90', 'aging_180', 'aging_180plus']
+aging_labels = {
+    'aging_60': 'Aging > 60 Days',
+    'aging_90': 'Aging > 90 Days',
+    'aging_180': 'Aging > 180 Days',
+    'aging_180plus': 'Aging > 180+ Days'
+}
+
+
+# ==== Load Data ====
+df_2024['date'] = pd.date_range(start='2024-01-01', periods=len(df_2024), freq='MS')
+
+
+import streamlit as st
+import pandas as pd
+from statsmodels.tsa.arima.model import ARIMA
+import plotly.graph_objects as go
+
+# Assume df_2024, aging_options, aging_labels are predefined
+
+
+
+
+
 with row1_col1:
-    fig = px.bar(
-        forecast_df,
-        x="description",
-        y="predicted_2025_qty",
-        title="Predicted Item Quantities",
-        text="predicted_2025_qty"
-    )
-    
-    # Improve layout for full width
-    fig.update_traces(texttemplate='%{text:.0f}', textposition='outside')
-    fig.update_layout(
-        xaxis_title="Item Description", 
-        yaxis_title="Predicted Quantity", 
-        title_x=0.5,
-        margin=dict(l=10, r=10, t=50, b=50),  # reduce plot margins
-    )
+    # Nested columns for selectboxes side by side, smaller width
+    sel_col1, sel_col2 = st.columns([2, 2])  # adjust ratios for width
 
-    st.plotly_chart(fig, use_container_width=True)
+    with sel_col1:
+        descriptions = ['All'] + sorted(df_2024['description'].dropna().unique().tolist())
+        selected_desc = st.selectbox("Description", descriptions)
 
-    # Add expander below the chart
-    with st.expander("📘 Story behind this"):
-        st.markdown("""
-### 
+    with sel_col2:
+        selected_aging = st.selectbox(
+            "Aging Category", 
+            aging_options, 
+            format_func=lambda x: aging_labels[x]
+        )
 
-- A linear regression model is trained on `qty ~ month_index`.
-- Predictions are made for the next 12 months (2025), corresponding to `month_index` values 61 to 72.
-- The total predicted quantity for all 12 months is computed.
-- The bar chart above visualizes the **total forecasted quantity for 2025**, allowing you to compare demand projections across items.
-""")
+    # Filter and preprocess
+    filtered_df = df_2024.copy()
+    if selected_desc != "All":
+        filtered_df = filtered_df[filtered_df['description'] == selected_desc]
 
+    filtered_df = filtered_df[['date', selected_aging]].dropna()
+    monthly_data = filtered_df.groupby('date')[selected_aging].sum().reset_index()
+
+    # Forecast & Plot
+    try:
+        model = ARIMA(monthly_data[selected_aging], order=(1, 1, 1))
+        model_fit = model.fit()
+        forecast = model_fit.forecast(steps=12)
+
+        forecast_dates = pd.date_range(start='2025-01-01', periods=12, freq='MS')
+        forecast_df = pd.DataFrame({'date': forecast_dates, 'forecast': forecast})
+        forecast_df['MonthLabel'] = forecast_df['date'].dt.strftime('%b %Y')
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=forecast_df['MonthLabel'],
+            y=forecast_df['forecast'],
+            mode='lines+markers',
+            name='2025 Forecast',
+            line=dict(color='orange', width=3)
+        ))
+
+        fig.update_layout(
+            title=f"Aging Forecast for 2025 ({aging_labels[selected_aging]})",
+            xaxis_title='Month',
+            yaxis_title='Predicted Aging Value',
+            plot_bgcolor='white',
+            hovermode='x unified',
+            height=500
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Explanation / Storyboard
+        with st.expander("📘 Story behind this", expanded=False):
+            st.markdown(f"""
+            - The graph displays a **12-month forecast** of the selected aging category (e.g., **{aging_labels[selected_aging]}**) for the year **2025**.
+            - Forecasting is based on historical monthly totals from your filtered selection.
+
+            ### How is the aging value calculated?
+            1. Data is filtered based on your selected **description**.
+            2. Only the selected **aging column** is considered (e.g., aging_60).
+            3. Missing values are dropped.
+            4. The remaining data is **grouped by month**, and the **sum of aging values** is calculated.
+
+            ### Forecasting Model Used
+            - We use the **ARIMA (AutoRegressive Integrated Moving Average)** model to project values for the next 12 months.
+            - ARIMA analyzes past trends and fluctuations in your data to make accurate future predictions.
+
+            ### What does `{selected_aging}` mean?
+            - This aging category tracks records/items that are approximately:
+              - **`aging_30`**: 0–29 days old
+              - **`aging_60`**: 30–59 days old
+              - **`aging_90`**: 60–89 days old
+              - **`aging_120`**: 90+ days old
+            - For example, `aging_60` means the value of records that have been stagnant or unpaid for **30–59 days**.
+
+         
+            """)
+
+    except Exception as e:
+        st.error(f"ARIMA prediction failed: {e}")
 
 
                 
