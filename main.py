@@ -32,12 +32,14 @@ from datetime import timedelta
 st.set_page_config(page_title="🎨 Stock Forecasting Analysis", layout="wide")
 with st.expander("📍 Sticky Note 1: Dashboard Overview"):
     st.markdown("""
-    - **Purpose**: Display 2025 forecasts based on 2024 data.
-    - **Contents**:
-        - KPIs
-        - Quantity trends
-        - Lead time
-        - Per-item forecasting
+    data processing use txndate , chnge to utc format 
+sort values through sort value builtin function sort the rows of data frame by column name
+inplace=true, sort wil modify the original dataframe and return a new sorted data frame
+define default value for lead time
+for lead time stock , we get the formula of =  qty - ( daily demand * leadtime)
+for daily demand = qty / 30 
+
+for forecasting we filter data by 2024 only ing
         - Turnover rates
     """)
 
