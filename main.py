@@ -82,22 +82,7 @@ header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------- SIDEBAR NAVIGATION -------------------
 
-
-# ------------------- FORECASTING FUNCTIONS -------------------
-
-@st.cache_data(show_spinner=False)
-def sarimax_forecast(ts, order=(1,1,1), seasonal_order=(1,1,1,12), steps=12):
-    try:
-        model = SARIMAX(ts, order=order, seasonal_order=seasonal_order,
-                        enforce_stationarity=False, enforce_invertibility=False)
-        model_fit = model.fit(disp=False)
-        forecast = model_fit.forecast(steps=steps)
-        return forecast
-    except Exception as e:
-        st.error(f"SARIMAX model error: {e}")
-        return pd.Series([np.nan]*steps)
 
 
 
@@ -135,13 +120,10 @@ filtered_data = df[(df["txndate"].dt.year == 2024)]
 # Automatically filter data for 2024 only
 
 
-#---side Bar
+#----------------------------------------------Navigation side Bar------------------------------------------
 st.sidebar.title("📦 Inventory Aging Forecast (2025)")
 with st.sidebar.expander("📊 Store behind this ", expanded=True):
     st.markdown("""
-
-
-🕒 
 
 - 🟢 **Fresh stock (≤ 60 days):** {aging_60} units are still relatively new and moving well.
 - 🟠 **Moderately aged (61-90 days):** {aging_90} units are approaching a moderate age and might need attention.
@@ -188,68 +170,109 @@ st.sidebar.markdown(f"---\n- **Total Forecast Qty (2025)**: {round(total_pred)} 
 with st.expander("KPIS"):
     st.markdown("""
     #
-
-    **r1c1: Quantity Over Time for 2025 (line chart)**  
-    - Combines historical filtered data with predicted quantities based on monthly averages.  
-    - Uses Plotly Express line chart.  
-    - Differentiates by "description" and "stockvalue".  
-
-    **r1c2: Lead Time Stock Forecast for 2025 (bar chart)**  
-    - Forecasts average lead time stock by month and description.  
-    - Displays with Plotly Express bar chart.  
-
-    **r1c3: Detailed SARIMAX Forecast for a Selected Item**  
-    - User selects item description from dropdown.  
-    - Forecasts next 12 months using SARIMAX model.  
-    - Warns if less than 24 months data available.  
-    - Shows interactive line chart with forecasted monthly quantities.
+for KPI we have decided to move with random forest as we have to predict 
+                kpis based on the historical data before 2024 and 2024 as well, 
+                in random forest we select features , then use features for test and train for training,
+                for the model we selected feature , do prediction and get mean value as 
+    **
     """)
 
-
-# KPIs for 2025 based on 2024 data (as example)
+#----------------------------------------------------For KPIS-----------------------------------
+# Filter the data
 df_2024 = df[df["year"] == 2024]
+train_df = df[df["year"] < 2024]
+test_df = df_2024.copy()
+
+# Features to use
+features = ["qty", "daily_demand", "lead_time_stock"]
+
+# Train and predict Quantity
+model_qty = RandomForestRegressor(random_state=42)
+model_qty.fit(train_df[features], train_df["qty"])
+pred_qty_2025 = model_qty.predict(test_df[features]).sum()
+
+# Train and predict Daily Demand
+model_demand = RandomForestRegressor(random_state=42)
+model_demand.fit(train_df[features], train_df["daily_demand"])
+pred_demand_2025 = model_demand.predict(test_df[features]).mean()
+
+# Train and predict Lead Time Stock
+model_lead = RandomForestRegressor(random_state=42)
+model_lead.fit(train_df[features], train_df["lead_time_stock"])
+pred_lead_2025 = model_lead.predict(test_df[features]).mean()
+
+
+
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("🛒 Total Quantity 2025", f"{df_2024['qty'].sum()}")
-k3.metric("📊 Avg Daily Demand 2025", f"{df_2024['daily_demand'].mean():.2f}")
-k4.metric("⏳ Avg Lead Time Stock 2025", f"{df_2024['lead_time_stock'].mean():.2f}")
+k1.metric("🛒 Total Quantity 2025", f"{pred_qty_2025:.0f}")
+k2.metric("📊 Avg Daily Demand 2025", f"{pred_demand_2025:.2f}")
+k3.metric("⏳ Avg Lead Time Stock 2025", f"{pred_lead_2025:.2f}")
 
 
 
-
-
+#----------------------------------Graph -------------------------------
+predicted_dates = pd.date_range("2025-01-01", "2025-12-01", freq="MS")
 
 
 # 1st Row Charts - three columns in one line
 r1c1, r1c2, r1c3 = st.columns(3)
 
-# --- Predict 2025 quantity from 2024 monthly averages ---
-filtered_data["month"] = filtered_data["txndate"].dt.month
-monthly_avg = filtered_data.groupby(["month", "description", "stockvalue"])["qty"].mean().reset_index()
+# --- Preprocessing ---
+filtered_data["month"] = filtered_data["txndate"].dt.to_period("M")
+grouped = filtered_data.groupby(["month", "description", "stockvalue"])["qty"].sum().reset_index()
+grouped["month"] = grouped["month"].dt.to_timestamp()
 
-predicted_dates = pd.date_range("2025-01-01", "2025-12-01", freq="MS")
+# --- SARIMAX Forecasting ---
+predicted_df_list = []
+unique_combinations = grouped[["description", "stockvalue"]].drop_duplicates()
 
-predicted_data = []
-for _, row in monthly_avg.iterrows():
-    for date in predicted_dates:
-        if date.month == row["month"]:
-            predicted_data.append({
-                "txndate": date,
-                "qty": row["qty"],
-                "description": row["description"],
-                "stockvalue": row["stockvalue"]
-            })
+for _, row in unique_combinations.iterrows():
+    desc = row["description"]
+    stock = row["stockvalue"]
 
-predicted_df = pd.DataFrame(predicted_data)
-combined_df = pd.concat([filtered_data, predicted_df])
+    subset = grouped[(grouped["description"] == desc) & (grouped["stockvalue"] == stock)]
+    subset = subset.set_index("month").asfreq("MS")  # Ensure monthly frequency
+
+    # Fill missing values if needed
+    subset["qty"] = subset["qty"].fillna(method='ffill')
+
+    # SARIMAX Model
+    try:
+        model = SARIMAX(subset["qty"], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12))
+        results = model.fit(disp=False)
+
+        future_dates = pd.date_range(start="2025-01-01", end="2025-12-01", freq="MS")
+        forecast = results.predict(start=len(subset), end=len(subset)+11)
+
+        temp_df = pd.DataFrame({
+            "txndate": future_dates,
+            "qty": forecast.values,
+            "description": desc,
+            "stockvalue": stock
+        })
+        predicted_df_list.append(temp_df)
+
+    except Exception as e:
+        print(f"Error for {desc}, {stock}: {e}")
+
+predicted_df = pd.concat(predicted_df_list, ignore_index=True)
+predicted_df["txndate"] = pd.to_datetime(predicted_df["txndate"])
+
+# --- Combine historical and forecast data ---
+historical_df = grouped.rename(columns={"month": "txndate"})
+combined_df = pd.concat([historical_df, predicted_df])
+
+# --- Plotting ---
 
 with r1c1:
-    
+    st.header("Quantity Forecast by Description and Stockvalue")
+   
     fig = px.line(combined_df, x="txndate", y="qty", color="description",
-                  line_dash="stockvalue",
-                  markers=True, template="plotly_dark",
-                  labels={"qty": "Quantity", "txndate": "Date"},
-                  title="Quantity over Time by Description and Stockvalue")
+                  line_dash="stockvalue", markers=True, template="plotly_dark",
+                  labels={"qty": "Quantity", "txndate": "Date"}
+                )
     st.plotly_chart(fig, use_container_width=True)
+
 
     with st.expander("📘 Story behind this graph"):
         st.write("""
@@ -258,7 +281,7 @@ with r1c1:
         outlook for demand.
         """)
 
-# --- Predict lead_time_stock for 2025 ---
+
 
 # Calculate monthly average lead_time_stock grouped by month and description
 monthly_leadtime_avg = filtered_data.groupby(["month", "description"])["lead_time_stock"].mean().reset_index()
@@ -266,7 +289,7 @@ monthly_leadtime_avg = filtered_data.groupby(["month", "description"])["lead_tim
 leadtime_predicted_data = []
 for _, row in monthly_leadtime_avg.iterrows():
     for date in predicted_dates:
-        if date.month == row["month"]:
+        if date.month == row["month"].month:
             leadtime_predicted_data.append({
                 "txndate": date,
                 "lead_time_stock": row["lead_time_stock"],
@@ -276,12 +299,13 @@ for _, row in monthly_leadtime_avg.iterrows():
 leadtime_predicted_df = pd.DataFrame(leadtime_predicted_data)
 
 with r1c2:
+    st.header("Forecasted Lead Time Stock by Description for 2025")
     
     fig = px.bar(leadtime_predicted_df, x="description", y="lead_time_stock",
                  color="description",
                  template="plotly_dark",
                  labels={"lead_time_stock": "Lead Time Stock", "description": "Description"},
-                 title="Forecasted Lead Time Stock by Description for 2025")
+                 title="")
     st.plotly_chart(fig, use_container_width=True)
 
     with st.expander("📘 Story behind this graph"):
@@ -291,8 +315,23 @@ with r1c2:
             """)
 
 # --- Forecasting section for selected description with SARIMAX ---
+# ------------------- FORECASTING FUNCTIONS -------------------
+
+@st.cache_data(show_spinner=False)
+def sarimax_forecast(ts, order=(1,1,1), seasonal_order=(1,1,1,12), steps=12):
+    try:
+        model = SARIMAX(ts, order=order, seasonal_order=seasonal_order,
+                        enforce_stationarity=False, enforce_invertibility=False)
+        model_fit = model.fit(disp=False)
+        forecast = model_fit.forecast(steps=steps)
+        return forecast
+    except Exception as e:
+        st.error(f"SARIMAX model error: {e}")
+        return pd.Series([np.nan]*steps)
+
+
 with r1c3:
-    
+    st.header("Forecast Quantity Month-Wise")
     descriptions = df["description"].unique()
     selected_desc = st.selectbox("Select Item Description for Forecasting", sorted(descriptions), key="forecast_desc")
     with st.expander("📘 Story behind this"):
@@ -317,11 +356,12 @@ with r1c3:
         })
 
         fig = px.line(
-            forecast_df,
+            forecast_df, 
             x="Month",
             y="Forecasted Quantity",
             markers=True,
             text="Forecasted Quantity",
+            title="Forescast Quantities Monthly",
             template="plotly_dark"
         )
         fig.update_traces(texttemplate='%{text:.0f}', textposition='top center')
@@ -331,13 +371,7 @@ with r1c3:
         
 
 # ------------------- 2nd ROW: Additional 6 Graphs -------------------
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import numpy as np
 
-# Your SARIMAX forecast function placeholder
 def sarimax_forecast(ts, steps=12):
     """
     Dummy sarimax forecast function.
@@ -352,8 +386,6 @@ def sarimax_forecast(ts, steps=12):
     return forecast_values
 
 # Simulate loading your data
-
-
 
 
 @st.cache_data(show_spinner=False)
@@ -375,8 +407,6 @@ forecast_all = forecast_all_descriptions(df)
 top_10 = sorted(forecast_all.items(), key=lambda x: x[1], reverse=True)[:10]
 top_10_df = pd.DataFrame(top_10, columns=["Description", "Predicted_Total_Qty_2025"])
 
-# 2024 turnover ratio calculation
-
 
 # 2025 turnover prediction
 qty_before_2025 = df[df["year"] < 2025].groupby("description")["qty"].sum()
@@ -390,21 +420,6 @@ turnover_pred_2025_df = pd.DataFrame(turnover_pred_2025, columns=["Description",
 
 
 
-
-# Load data
-file_path = os.path.join(os.getcwd(), "data", "cust_stock.json")
-if not os.path.exists(file_path):
-    st.error("File not found: cust_stock.json")
-    st.stop()
-
-with open(file_path, "r") as f:
-    raw_data = json.load(f)
-
-df = pd.DataFrame(raw_data["items"])
-
-# Preprocessing
-df["txndate"] = pd.to_datetime(df["txndate"], utc=True)
-df["year_month"] = df["txndate"].dt.to_period("M").astype(str)
 df["month_index"] = (df["txndate"].dt.year - 2020) * 12 + df["txndate"].dt.month  # use as numeric feature
 df["description"] = df["description"].astype(str)
 
@@ -442,14 +457,6 @@ for item in monthly_data["description"].unique():
 forecast_df = pd.DataFrame(forecast_results).sort_values(by="predicted_2025_qty", ascending=False)
 
 
-# Create three columns
-# ==== Page Title ====
-import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from statsmodels.tsa.arima.model import ARIMA
-
-# ==== Page Title ====
 
 
 # ==== Define Layout ====
@@ -523,8 +530,11 @@ with row1_col1:
             line=dict(color='orange', width=3)
         ))
 
+        # Display the header above the chart
+        st.header(f"Aging Forecast for 2025 ({aging_labels[selected_aging]})")
+
+        # Update Plotly figure layout
         fig.update_layout(
-            title=f"Aging Forecast for 2025 ({aging_labels[selected_aging]})",
             xaxis_title='Month',
             yaxis_title='Predicted Aging Value',
             plot_bgcolor='white',
@@ -532,6 +542,7 @@ with row1_col1:
             height=500
         )
 
+        # Show the chart
         st.plotly_chart(fig, use_container_width=True)
 
         # Explanation / Storyboard
@@ -557,8 +568,6 @@ with row1_col1:
               - **`aging_90`**: 60–89 days old
               - **`aging_120`**: 90+ days old
             - For example, `aging_60` means the value of records that have been stagnant or unpaid for **30–59 days**.
-
-         
             """)
 
     except Exception as e:
