@@ -580,9 +580,9 @@ with row1_col1:
                 
 
 with row1_col2:
-    
+    st.header("Top 10 Items Predicted to be Bought in 2025")
     fig = px.bar(top_10_df, x="Description", y="Predicted_Total_Qty_2025",
-                 title="Top 10 Items Predicted to be Bought in 2025",
+               
                  template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
     with st.expander("📘 Story behind this graph"):
@@ -592,9 +592,9 @@ with row1_col2:
             """)
 
 with row1_col3:
-    
+    st.header("2025 Predicted Top 10 Items Share")
     fig = px.pie(top_10_df, names="Description", values="Predicted_Total_Qty_2025",
-                 title="2025 Predicted Top 10 Items Share", template="plotly_dark")
+               template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
     with st.expander("📘 Story behind this graph"):
         st.write("""
@@ -662,10 +662,11 @@ row2_col1, row2_col2, row2_col3 = st.columns(3)
 
 # 1. Total monthly predicted quantity chart
 with row2_col1:
+    st.header("Total Monthly Predicted Quantity for 2025")
     st.plotly_chart(
         px.line(
             monthly_pred_2025,
-            title="Total Monthly Predicted Quantity for 2025",
+            
             labels={"index": "Month", "value": "Predicted Qty"}
         ),
         use_container_width=True
@@ -679,18 +680,20 @@ with row2_col1:
 
 # 2. Turnover scatter plot
 merged_df = turnover_pred_2025_df.merge(top_10_df, on="Description", how="inner")
+
 fig_scatter = px.scatter(
     merged_df,
     x="Predicted_Turnover_2025",
     y="Predicted_Total_Qty_2025",
     hover_name="Description",
-    title="Turnover Ratio vs Predicted Quantity",
+    
     labels={
         "Predicted_Turnover_2025": "Predicted Turnover Ratio",
         "Predicted_Total_Qty_2025": "Predicted Qty"
     }
 )
 with row2_col2:
+    st.header("Turnover Ratio vs Predicted Quantity")
     st.plotly_chart(fig_scatter, use_container_width=True)
     with st.expander("📘 Story behind this"):
         st.markdown("""
@@ -764,12 +767,13 @@ fab_predictions_df = pd.concat(fab_predictions_list, ignore_index=True)
 
 # Plotting
 with row2_col3:
+    st.header("📈 Predicted Stock Value by FAB Type (2025)")
     fig_fab = px.line(
         fab_predictions_df,
         x="year_month",
         y="predicted_stock_value",
         color="fabtype",
-        title="📈 Predicted Stock Value by FAB Type (2025)"
+        
     )
     st.plotly_chart(fig_fab, use_container_width=True)
 
