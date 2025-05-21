@@ -173,7 +173,7 @@ with st.expander("KPIS"):
 for KPI we have decided to move with random forest as we have to predict 
                 kpis based on the historical data before 2024 and 2024 as well, 
                 in random forest we select features , then use features for test and train for training,
-                for the model we selected feature , do prediction and get mean value as 
+                for the model we selected feature , do prediction and get mean value as well
     **
     """)
 
@@ -310,8 +310,10 @@ with r1c2:
 
     with st.expander("📘 Story behind this graph"):
             st.write("""
-            This scatter plot visualizes the relationship between predicted turnover ratios and forecasted purchase quantities.
-            It helps identify items that are both high in demand and turnover, useful for prioritizing inventory and sales focus.
+            This bar chart shows the **forecasted average lead time stock** for each item description in 2025.
+
+        - **Lead time stock** refers to the amount of stock you need to cover the lead time period — the time between placing and receiving an order.
+        - The forecast is based on the **historical monthly averages**, mapped onto the corresponding months in 2025..
             """)
 
 # --- Forecasting section for selected description with SARIMAX ---
@@ -337,9 +339,10 @@ with r1c3:
     with st.expander("📘 Story behind this"):
    
      st.markdown("""
-    - You have monthly quantity transaction data for various items.
-    - Forecasting helps you **plan inventory, procurement, or production** by anticipating demand for each item.
-    - We’ll use SARIMAX time series modeling to forecast quantities from **January to December 2025**.
+    
+    -This graph displays the forecasted monthly demand (quantity) for a selected item from January to December 2025 by using Sarimax in it to get historical pattern and
+                 learn from it to predict fo future values
+      
     """)
     df_desc = df[df["description"] == selected_desc]
     ts_monthly = df_desc.groupby(df_desc["txndate"].dt.to_period("M")).agg({"qty": "sum"})["qty"]
@@ -531,7 +534,7 @@ with row1_col1:
         ))
 
         # Display the header above the chart
-        st.header(f"Aging Forecast for 2025 ({aging_labels[selected_aging]})")
+        st.header(f"Aging Forecast for 2025")
 
         # Update Plotly figure layout
         fig.update_layout(
@@ -696,47 +699,94 @@ with row2_col2:
         It helps identify high-volume, high-turnover items that might require special attention for procurement and inventory management.
         """)
 
-# 3. Predicted lead time stock chart
-df_agg = df_2024.groupby("year_month").agg({"lead_time_stock": "sum"}).reset_index()
-df_agg["year_month"] = pd.to_datetime(df_agg["year_month"])
-df_agg["month"] = df_agg["year_month"].dt.month
-df_agg["year"] = df_agg["year_month"].dt.year
+# Ensure year_month is datetime
+df_fab = df_2024.copy()
+df_fab["year_month"] = pd.to_datetime(df_fab["year_month"])
+df_fab["month"] = df_fab["year_month"].dt.month
+df_fab["year"] = df_fab["year_month"].dt.year
 
-for lag in [1, 2, 3]:
-    df_agg[f"lag_{lag}"] = df_agg["lead_time_stock"].shift(lag)
-df_agg = df_agg.dropna()
+# Group by fabtype and year_month
+fab_grouped = df_fab.groupby(["fabtype", "year_month"]).agg({"stockvalue": "sum"}).reset_index()
 
-X = df_agg[["month", "lag_1", "lag_2", "lag_3"]]
-y = df_agg["lead_time_stock"]
-model = RandomForestRegressor(random_state=42)
-model.fit(X, y)
+# List to store predictions
+fab_predictions_list = []
 
-future_months = pd.date_range(start="2025-01-01", end="2025-12-01", freq='MS')
-future_df = pd.DataFrame({"year_month": future_months, "month": future_months.month, "year": future_months.year})
-last_known = df_agg.set_index("year_month").sort_index()
-predictions = []
+# Unique fab types
+fab_types = fab_grouped["fabtype"].dropna().unique()
 
-for i, date in enumerate(future_months):
-    lag_1 = last_known["lead_time_stock"].iloc[-1] if i == 0 else predictions[-1]
-    lag_2 = last_known["lead_time_stock"].iloc[-2] if i < 2 else predictions[-2]
-    lag_3 = last_known["lead_time_stock"].iloc[-3] if i < 3 else predictions[-3]
-    x_pred = np.array([[date.month, lag_1, lag_2, lag_3]])
-    pred = model.predict(x_pred)[0]
-    predictions.append(pred)
-    last_known.loc[date] = [pred, date.month, date.year, lag_1, lag_2, lag_3]
+# Loop through each fab type and forecast
+for fab in fab_types:
+    df_temp = fab_grouped[fab_grouped["fabtype"] == fab].copy().sort_values("year_month")
+    df_temp["month"] = df_temp["year_month"].dt.month
+    df_temp["year"] = df_temp["year_month"].dt.year
 
-future_df["predicted_lead_time_stock"] = predictions
+    # Create lag features
+    for lag in [1, 2, 3]:
+        df_temp[f"lag_{lag}"] = df_temp["stockvalue"].shift(lag)
 
+    df_temp = df_temp.dropna()
+    if df_temp.empty:
+        continue
+
+    # Prepare training data
+    X = df_temp[["month", "lag_1", "lag_2", "lag_3"]]
+    y = df_temp["stockvalue"]
+
+    # Train model
+    model = RandomForestRegressor(random_state=42)
+    model.fit(X, y)
+
+    # Prepare for prediction
+    future_months = pd.date_range(start="2025-01-01", end="2025-12-01", freq='MS')
+    predictions = []
+
+    # Get last 3 known stock values for lags
+    lag_vals = list(df_temp["stockvalue"].iloc[-3:])
+
+    # Generate predictions for each future month
+    for i, date in enumerate(future_months):
+        month_val = date.month
+        x_pred = np.array([[month_val, lag_vals[-1], lag_vals[-2], lag_vals[-3]]])
+        pred = model.predict(x_pred)[0]
+        predictions.append(pred)
+        lag_vals.append(pred)
+
+    # Build prediction DataFrame for current FAB type
+    fab_future_df = pd.DataFrame({
+        "year_month": future_months,
+        "fabtype": fab,
+        "predicted_stock_value": predictions
+    })
+    fab_predictions_list.append(fab_future_df)
+
+# Combine all predictions
+fab_predictions_df = pd.concat(fab_predictions_list, ignore_index=True)
+
+# Plotting
 with row2_col3:
-    st.plotly_chart(
-        px.line(future_df, x="year_month", y="predicted_lead_time_stock", title="Predicted Lead Time Stock for 2025"),
-        use_container_width=True
+    fig_fab = px.line(
+        fab_predictions_df,
+        x="year_month",
+        y="predicted_stock_value",
+        color="fabtype",
+        title="📈 Predicted Stock Value by FAB Type (2025)"
     )
+    st.plotly_chart(fig_fab, use_container_width=True)
+
     with st.expander("📘 Story behind this"):
         st.markdown("""
-        This visualization forecasts the **lead time stock** (aggregate) for each month in 2025 using a **Random Forest model**.
-        
-        It utilizes lag-based features from 2024 data and reveals supply chain pressure trends—critical for procurement planning.
-        """)
+        This forecasting system is built to predict monthly stock values for different FAB types for the year 2025. we use random forest, it start by grouping the data by FAB type and 
+                    month-year to compute total stock value over time. For each FAB type: We extract the month and year from the date and calculate lag features: stock values from the last 1, 2, and 3 months. These help the model understand short-term memory in time.
 
-# Optionally, you can include another section for heatmap or top 5 trends with similar expanders
+A separate Random Forest model is trained for each FAB type using current month, stock values for last three months like lag wise lag1, lag 2, ..
+The actual stock value for that month as the target.
+
+Forecasting Future
+For each month in 2025, the model:
+
+Takes the last 3 predicted (or actual) values as input.
+
+Predicts the next month’s stock value.
+
+
+        """)
